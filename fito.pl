@@ -31,7 +31,7 @@ our $ACTIVITY_TYPES = [
 
 our $username = 'thumbdog';
 our $password = 'password';
-our $targetuser = 'ironjesus';
+our $targetuser = 'glorat';
 $m->agent_alias('Windows Mozilla');
 
 $m->get($LOGIN_URL);

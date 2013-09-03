@@ -10,34 +10,67 @@ use DateTime;
 use DateTime::Format::DateParse;
 use Data::Google::Visualization::DataTable;
 use JSON;
-use JSON::XS;
+use Mojolicious::Lite;
+
 
 # Config
 our @POWERLIFTS = ('Barbell Squat', 'Barbell Bench Press', 'Barbell Deadlift', 'Standing Barbell Shoulder Press (OHP)', 'Pendlay Row');
 our %POWERSET = map {$_ => 1} (@POWERLIFTS);
 
 # Util objects
-my($f) = File::Util->new();
-#my $fitdtparse = DateTime::Format::Strptime->new( pattern => '%d %b, %Y' );
+our($f) = File::Util->new();
 
-my $jsonStream=$f->load_file('ironjesus.json');
-my @streamItem = @{decode_json($jsonStream)};
+get '/user/:username' => sub {};
 
-filterPowerlifts(\@streamItem);
-filterMaxWeight(\@streamItem);
-filterSetReps(\@streamItem, 1, 1);
-print powerTableMax(\@streamItem);
-exit;
-# Display
-foreach my $item (@streamItem) {
-	print $item->{date}->date. "\n";
-	foreach my $action (@{$item->{actions}}) {
-		print " *$action->{name}*\n";
-		foreach my $set ($action->{sets}) {
-			printSets($set);
-		}
+any '/userjson/:username' => sub {
+	my $c = shift;
+	my $target = $c->param('username');
+	$target =~ m/^[A-Za-z0-9]+$/ or return $c->render(text => 'Invalid username');
+	my $js = getTargetJson($target);
+	my $json = "jsonData=$js; drawChart();";
+	$c->render(text => $json, format => 'json');
+};
+
+any '/debug' => sub {
+    my $c = shift;
+	my @nms = $c->param;
+	my $str = $c->req->body;
+	$str .= "\n";
+	foreach (@nms) {
+		$str.="$_ : " . $c->param($_) ."\n";
 	}
-	print "\n";
+    $c->render(text => $str);
+};
+
+app->start;
+
+sub getTargetJson {
+	my ($target) = @_;
+	return '' unless $f->can_read("${target}.json");
+	
+	my $jsonStream=$f->load_file("${target}.json");
+	my @streamItem = @{decode_json($jsonStream)};
+
+	filterPowerlifts(\@streamItem);
+	filterMaxWeight(\@streamItem);
+	filterSetReps(\@streamItem, 1, 1);
+	return powerTableMax(\@streamItem);
+
+}
+
+sub debugStream {
+	my ($stream) = @_;
+	# Display
+	foreach my $item (@$stream) {
+		print $item->{date}->date. "\n";
+		foreach my $action (@{$item->{actions}}) {
+			print " *$action->{name}*\n";
+			foreach my $set ($action->{sets}) {
+				printSets($set);
+			}
+		}
+		print "\n";
+	}
 }
 
 sub powerTableMax {
@@ -172,13 +205,39 @@ sub Mojo::Collection::DESTROY {
 	# Nothing doing! Do not autoload call
 }
 
-__END__
+__DATA__
+@@ userusername.html.ep
+<html>
+  <head>
+    <script type="text/javascript" src="https://www.google.com/jsapi"></script>
+	<script type="text/javascript" src="//ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script>
+	
+    <script type="text/javascript">
+      google.load("visualization", "1", {packages:["corechart"]});
+      // google.setOnLoadCallback(drawChart);
+	  var jsonData;
+	  
+	  google.setOnLoadCallback(defaultChart);
+	  
+	  function defaultChart() {
+		  jsonData = $.ajax({
+		            url: "/userjson/<%== $username %>",
+		            dataType:"script",
+		            async: true
+		            });
+	  }
+	  
+      function drawChart() {
+		  var data = new google.visualization.DataTable(jsonData);
+		  var options = {"hAxis":{"title":""},"vAxis":{"title":"","format":"# kg"},"width":900,"height":500,"interpolateNulls":true,"legend":{"position":"top","maxLines":5}};
 
-my $s = scraper {
-	process "div.stream_item", "items[]" => scraper {
-		process "ul.action_detail li", "foo[]" => scraper {
-			process "div.action_prompt", activity=>'TEXT',
-			process "ul li", content => 'HTML',
-		}
-	};
-};
+        var chart = new google.visualization.LineChart(document.getElementById('chart_div'));
+        chart.draw(data, options);
+      }
+    </script>
+  </head>
+  <body>
+  <h1>Fitocracy performance for <%== $username %></h1>
+    <div id="chart_div" style="width: 900px; height: 500px;">Loading...</div>
+  </body>
+</html>
