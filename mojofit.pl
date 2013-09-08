@@ -20,13 +20,29 @@ our %POWERSET = map {$_ => 1} (@POWERLIFTS);
 # Util objects
 our($f) = File::Util->new();
 
-get '/user/:username' => sub {};
+get '/user/:username' => sub {
+	my $c = shift;
+	my $minreps = $c->param('minreps');
+	my $minsets = $c->param('minsets');
+	$minreps ||= 1;
+	$minsets ||= 1;
+	$c->stash('minreps',$minreps);
+	$c->stash('minsets',$minsets);
+	
+	my $target = $c->param('username');
+	$target =~ m/^[A-Za-z0-9]+$/ or return $c->render(text => 'Invalid username');
+	my $stream = getStream($target);
+	filterPowerlifts($stream);
+	filterMaxWeight($stream);
+	
+	$c->stash('log', formatStream($stream));
+};
 
-any '/userjson/:username' => sub {
+any '/userjson/:username/:minsets/:minreps' => sub {
 	my $c = shift;
 	my $target = $c->param('username');
 	$target =~ m/^[A-Za-z0-9]+$/ or return $c->render(text => 'Invalid username');
-	my $js = getTargetJson($target);
+	my $js = getTargetJson($target, $c->param('minsets'), $c->param('minreps'));
 	my $json = "jsonData=$js; drawChart();";
 	$c->render(text => $json, format => 'json');
 };
@@ -44,8 +60,15 @@ any '/debug' => sub {
 
 app->start;
 
-sub getTargetJson {
+sub getStream {
 	my ($target) = @_;
+	return '' unless $f->can_read("${target}.json");
+	my $jsonStream=$f->load_file("${target}.json");
+	return decode_json($jsonStream);
+}
+
+sub getTargetJson {
+	my ($target, $minsets, $minreps) = @_;
 	return '' unless $f->can_read("${target}.json");
 	
 	my $jsonStream=$f->load_file("${target}.json");
@@ -53,24 +76,27 @@ sub getTargetJson {
 
 	filterPowerlifts(\@streamItem);
 	filterMaxWeight(\@streamItem);
-	filterSetReps(\@streamItem, 1, 1);
+	filterSetReps(\@streamItem, $minsets, $minreps);
 	return powerTableMax(\@streamItem);
 
 }
 
-sub debugStream {
+sub formatStream {
 	my ($stream) = @_;
+	my $ret = '';
 	# Display
 	foreach my $item (@$stream) {
-		print $item->{date}->date. "\n";
+		my $dt = DateTime->from_epoch( epoch => $item->{date});
+		$ret .= $dt->ymd. "\n";
 		foreach my $action (@{$item->{actions}}) {
-			print " *$action->{name}*\n";
+			$ret .= " $action->{name} : ";
 			foreach my $set ($action->{sets}) {
-				printSets($set);
+				$ret .= formatSets($set);
 			}
 		}
-		print "\n";
+		$ret .= "\n";
 	}
+	return $ret;
 }
 
 sub powerTableMax {
@@ -165,22 +191,25 @@ sub parseSetText {
 	return \%setData;
 }
 
-sub printSets {
+sub formatSets {
 	my ($sets) = @_;
+	my $ret = '';
 	if ($sets->[0]->{kg}) {
-		printFormatWeightedSets($sets);
+		$ret .= formatWeightedSets($sets);
 	}
 	else {
 		foreach my $set (@$sets) {
-			print $set->{kg}. " kg " if $set->{kg};
-			print $set->{reps}." reps " if $set->{reps};
-			print "\n";
+			$ret .= $set->{kg}. " kg " if $set->{kg};
+			$ret .= $set->{reps}." reps " if $set->{reps};
+			$ret .= "\n";
 		}
 	}
+	return $ret;
 }
 
-sub printFormatWeightedSets {
+sub formatWeightedSets {
 	my ($sets) = @_;
+	my $ret = '';
 	return "" if (0==scalar(@$sets)); # Warn?
 	foreach my $set (@$sets) {
 		#print $set->{kg}. " kg " if $set->{kg};
@@ -192,12 +221,13 @@ sub printFormatWeightedSets {
 	#print "Max $max kg\n";
 	if (all {$_->{reps} == $maxset[0]->{reps}} (@maxset)) {
 		my $n = scalar(@maxset);
-		print "  ${n}x$sets->[0]->{reps} ${max}kg\n";
+		$ret .= "  ${n}x$sets->[0]->{reps} ${max}kg\n";
 	}
 	else {
 		my $reps = join('/', map {$_->{reps}} (@maxset));
-		print "  $reps ${max}kg\n";
+		$ret .= "  $reps ${max}kg\n";
 	}
+	return $ret;
 }
 
 
@@ -221,7 +251,7 @@ __DATA__
 	  
 	  function defaultChart() {
 		  jsonData = $.ajax({
-		            url: "/userjson/<%== $username %>",
+		            url: "/userjson/<%== $username %>/<%== $minsets %>/<%== $minreps %>",
 		            dataType:"script",
 		            async: true
 		            });
@@ -239,5 +269,10 @@ __DATA__
   <body>
   <h1>Fitocracy performance for <%== $username %></h1>
     <div id="chart_div" style="width: 900px; height: 500px;">Loading...</div>
+	<form>
+	<input type="number" name="minsets" value="<%== $minsets %>"> sets x <input type="number" name="minreps" value="<%== $minreps %>"> reps<br>
+	<input type="submit">
+	</form>
+	<pre><%== $log %></pre>
   </body>
 </html>
