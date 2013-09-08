@@ -1,5 +1,6 @@
 #!/usr/bin/perl
-
+use FindBin;
+use lib "$FindBin::Bin";
 use strict;
 use File::Util;
 use Data::Dumper;
@@ -26,7 +27,9 @@ any '/userjson/:username' => sub {
 	my $c = shift;
 	my $target = $c->param('username');
 	$target =~ m/^[A-Za-z0-9]+$/ or return $c->render(text => 'Invalid username');
-	my $js = getTargetJson($target);
+	my $minsets = $c->param('sets') || 1;
+	my $minreps = $c->param('reps') || 1;
+	my $js = getTargetJson($target, $minsets, $minreps);
 	my $json = "jsonData=$js; drawChart();";
 	$c->render(text => $json, format => 'json');
 };
@@ -45,7 +48,7 @@ any '/debug' => sub {
 app->start;
 
 sub getTargetJson {
-	my ($target) = @_;
+	my ($target, $minsets, $minreps) = @_;
 	return '' unless $f->can_read("${target}.json");
 	
 	my $jsonStream=$f->load_file("${target}.json");
@@ -53,7 +56,7 @@ sub getTargetJson {
 
 	filterPowerlifts(\@streamItem);
 	filterMaxWeight(\@streamItem);
-	filterSetReps(\@streamItem, 1, 1);
+	filterSetReps(\@streamItem, $minsets, $minreps);
 	return powerTableMax(\@streamItem);
 
 }
