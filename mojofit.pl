@@ -43,8 +43,8 @@ any '/userjson/:username/:minsets/:minreps' => sub {
 	my $c = shift;
 	my $target = $c->param('username');
 	$target =~ m/^[A-Za-z0-9]+$/ or return $c->render(text => 'Invalid username');
-	my $minsets = $c->param('sets') || 1;
-	my $minreps = $c->param('reps') || 1;
+	my $minsets = $c->param('minsets') || 1;
+	my $minreps = $c->param('minreps') || 1;
 	my $js = getTargetJson($target, $minsets, $minreps);
 	my $json = "jsonData=$js; drawChart();";
 	$c->render(text => $json, format => 'json');
