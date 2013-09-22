@@ -81,19 +81,29 @@ sub getTargetJson {
 	filterMaxWeight(\@streamItem);
 	filterSetReps(\@streamItem, $minsets, $minreps);
 	summariseMax(\@streamItem, \@POWERLIFTS);
+	movingMax(\@streamItem, 'Barbell Squat');
 	return powerTableMax(\@streamItem);
 
 }
 
 sub movingMax {
-	my ($stream, $exname) = @_;
-	my $LOOKBACK=28; # Typical cycle is max 28 days
-	for my $i (0..scalar(@$stream)) {
+	my ($origstream, $exname) = @_;
+	my $LOOKBACK=28 * 24 * 60 *60; # Typical cycle is max 28 days
+	
+	my $stream = [sort {$a->{date} <=> $b->{date}} @$origstream];
+	
+	for my $i (0..scalar(@$stream)-1) {
 		my $item = $stream->[$i];
 		my $back = $i-1;
-		while ($stream->[$back]) {
+		my $workouts = 0; # Workouts in period
+		#print STDERR "Looking back from $item->{'date'} to $stream->[$back]->{'date'}\n";
+		while ($back>=0 && $stream->[$back] && ($stream->[$back]->{'date'}+$LOOKBACK > $item->{'date'})) {
+			$workouts ++ if $stream->[$back]->{'max'}->{$exname};
 			$back--;
 		}
+		#print STDERR "$item->{date} $workouts\n";
+		
+		$item->{'consistency'} = $workouts;
 	}
 }
 
@@ -121,11 +131,12 @@ sub powerTableMax {
 	my @powercols = map { {id=>'', label=>$_, type=>'number'}} @POWERLIFTS;
 	 $datatable->add_columns(
 	        { id => 'date',     label => "Date",        type => 'date', p => {}},
+			{ id => 'consistency',     label => "Consistency",        type => 'number', p => {}},
 	        @powercols,
 	 );
 
 	 foreach my $item (@$streamItems) {
-		 my @row = ({v=>$item->{date}});
+		 my @row = ({v=>$item->{date}}, {v=>$item->{consistency}},  );
 		 map { push @row, {v=>$item->{'max'}->{$_}} } (@POWERLIFTS);
 		 $datatable->add_rows(\@row);
 	 }
