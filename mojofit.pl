@@ -80,8 +80,21 @@ sub getTargetJson {
 	filterPowerlifts(\@streamItem);
 	filterMaxWeight(\@streamItem);
 	filterSetReps(\@streamItem, $minsets, $minreps);
+	summariseMax(\@streamItem, \@POWERLIFTS);
 	return powerTableMax(\@streamItem);
 
+}
+
+sub movingMax {
+	my ($stream, $exname) = @_;
+	my $LOOKBACK=28; # Typical cycle is max 28 days
+	for my $i (0..scalar(@$stream)) {
+		my $item = $stream->[$i];
+		my $back = $i-1;
+		while ($stream->[$back]) {
+			$back--;
+		}
+	}
 }
 
 sub formatStream {
@@ -113,11 +126,21 @@ sub powerTableMax {
 
 	 foreach my $item (@$streamItems) {
 		 my @row = ({v=>$item->{date}});
-		 map { push @row, {v=>getMaxFromItem($item, $_)} } (@POWERLIFTS);
+		 map { push @row, {v=>$item->{'max'}->{$_}} } (@POWERLIFTS);
 		 $datatable->add_rows(\@row);
 	 }
 	 my $output = $datatable->output_javascript();
 	 return $output;
+}
+
+sub summariseMax {
+	my ($stream, $exnames) = @_;
+ 	foreach my $item (@$stream) {
+		foreach (@$exnames) { 
+			$item->{'max'}->{$_} = getMaxFromItem($item, $_);
+		}
+ 	}
+	return $stream;
 }
 
 sub filterSetReps {
