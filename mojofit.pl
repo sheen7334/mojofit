@@ -122,7 +122,7 @@ sub movingMax {
 		}
 		#print STDERR "$item->{date} $workouts\n";
 
-		$item->{'consistency'} = $workouts;
+		$item->{'consistency'} = sprintf('%d', 100* ($workouts / $perdays) / (3/7));
 	}
 }
 
@@ -328,7 +328,7 @@ __DATA__
     <div id="chart_div" style="width: 900px; height: 500px;">Loading...</div>
 	<form>
 	<input type="number" name="minsets" value="<%== $minsets %>" size="2" max="99"> sets x <input type="number" name="minreps" value="<%== $minreps %>" width="2"> reps<br>
-	Filter to period cycle <%= check_box useperiod => 1 %> of <input type="number" name="period" value="<%== $period %>" width="2"> days<br>
+	Smooth to periodic cycle <%= check_box useperiod => 1 %> of <input type="number" name="period" value="<%== $period %>" width="2"> days<br>
 	<input type="submit">
 	</form>
 	<pre><%== $log %></pre>
