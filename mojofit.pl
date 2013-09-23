@@ -13,6 +13,7 @@ use Data::Google::Visualization::DataTable;
 use JSON;
 use Mojolicious::Lite;
 
+#plugin 'TagHelpers';
 
 # Config
 our @POWERLIFTS = ('Barbell Squat', 'Barbell Bench Press', 'Barbell Deadlift', 'Standing Barbell Shoulder Press (OHP)', 'Pendlay Row');
@@ -25,11 +26,17 @@ get '/user/:username' => sub {
 	my $c = shift;
 	my $minreps = $c->param('minreps');
 	my $minsets = $c->param('minsets');
+	my $period = $c->param('period');
+	my $useperiod = $c->param('useperiod');
 	$minreps ||= 1;
 	$minsets ||= 1;
+	$period ||= 28;
+	$useperiod ||= 0;
 	$c->stash('minreps',$minreps);
 	$c->stash('minsets',$minsets);
-	
+	$c->stash('period',$period);
+	$c->stash('jsperiod', $c->param('useperiod') ? $c->param('period') : 0);
+	#$c->stash('useperiod',$useperiod);
 	my $target = $c->param('username');
 	$target =~ m/^[A-Za-z0-9]+$/ or return $c->render(text => 'Invalid username');
 	my $stream = getStream($target);
@@ -39,13 +46,14 @@ get '/user/:username' => sub {
 	$c->stash('log', formatStream($stream));
 };
 
-any '/userjson/:username/:minsets/:minreps' => sub {
+any '/userjson/:username/:minsets/:minreps/:period' => sub {
 	my $c = shift;
 	my $target = $c->param('username');
 	$target =~ m/^[A-Za-z0-9]+$/ or return $c->render(text => 'Invalid username');
 	my $minsets = $c->param('minsets') || 1;
 	my $minreps = $c->param('minreps') || 1;
-	my $js = getTargetJson($target, $minsets, $minreps);
+	my $period = $c->param('period');
+	my $js = getTargetJson($target, $minsets, $minreps, $period);
 	my $json = "jsonData=$js; drawChart();";
 	$c->render(text => $json, format => 'json');
 };
@@ -71,7 +79,7 @@ sub getStream {
 }
 
 sub getTargetJson {
-	my ($target, $minsets, $minreps) = @_;
+	my ($target, $minsets, $minreps, $period) = @_;
 	return '' unless $f->can_read("${target}.json");
 	
 	my $jsonStream=$f->load_file("${target}.json");
@@ -81,14 +89,14 @@ sub getTargetJson {
 	filterMaxWeight(\@streamItem);
 	filterSetReps(\@streamItem, $minsets, $minreps);
 	summariseMax(\@streamItem, \@POWERLIFTS);
-	movingMax(\@streamItem, 'Barbell Squat');
-	return powerTableMax(\@streamItem);
+	movingMax(\@streamItem, 'Barbell Squat', $period);
+	return powerTableMax(\@streamItem, $period);
 
 }
 
 sub movingMax {
-	my ($origstream, $exname) = @_;
-	my $LOOKBACK=28 * 24 * 60 *60; # Typical cycle is max 28 days
+	my ($origstream, $exname, $perdays) = @_;
+	my $LOOKBACK= $perdays * 24 * 60 *60; # Days to secs
 	
 	my $stream = [sort {$a->{date} <=> $b->{date}} @$origstream];
 	
@@ -97,12 +105,23 @@ sub movingMax {
 		my $back = $i-1;
 		my $workouts = 0; # Workouts in period
 		#print STDERR "Looking back from $item->{'date'} to $stream->[$back]->{'date'}\n";
-		while ($back>=0 && $stream->[$back] && ($stream->[$back]->{'date'}+$LOOKBACK > $item->{'date'})) {
-			$workouts ++ if $stream->[$back]->{'max'}->{$exname};
-			$back--;
+		if ($perdays) {
+			my %permax = map { $_ => $item->{'max'}->{$_} } (@POWERLIFTS);
+			while ($back>=0 && $stream->[$back] && ($stream->[$back]->{'date'}+$LOOKBACK > $item->{'date'})) {
+				my $old = $stream->[$back];
+				$workouts ++ if $old->{'max'}->{$exname};
+				foreach (@POWERLIFTS) {
+					my $oldmax = $old->{'max'}->{$_};
+					if ($permax{$_} && $oldmax) {
+						$permax{$_} = $permax{$_}< $oldmax ? $oldmax : $permax{$_}
+					}
+				}
+				$back--;
+			}
+			$item->{'permax'} = \%permax;
 		}
 		#print STDERR "$item->{date} $workouts\n";
-		
+
 		$item->{'consistency'} = $workouts;
 	}
 }
@@ -126,7 +145,8 @@ sub formatStream {
 }
 
 sub powerTableMax {
-	my $streamItems = shift;
+	my ($streamItems, $period) = @_;
+	my $maxfld = $period ? 'permax' : 'max';
 	my $datatable = Data::Google::Visualization::DataTable->new();
 	my @powercols = map { {id=>'', label=>$_, type=>'number'}} @POWERLIFTS;
 	 $datatable->add_columns(
@@ -137,7 +157,7 @@ sub powerTableMax {
 
 	 foreach my $item (@$streamItems) {
 		 my @row = ({v=>$item->{date}}, {v=>$item->{consistency}},  );
-		 map { push @row, {v=>$item->{'max'}->{$_}} } (@POWERLIFTS);
+		 map { push @row, {v=>$item->{$maxfld}->{$_}} } (@POWERLIFTS);
 		 $datatable->add_rows(\@row);
 	 }
 	 my $output = $datatable->output_javascript();
@@ -288,7 +308,7 @@ __DATA__
 	  
 	  function defaultChart() {
 		  jsonData = $.ajax({
-		            url: "/userjson/<%== $username %>/<%== $minsets %>/<%== $minreps %>",
+		            url: "/userjson/<%== $username %>/<%== $minsets %>/<%== $minreps %>/<%== $jsperiod %>",
 		            dataType:"script",
 		            async: true
 		            });
@@ -304,10 +324,11 @@ __DATA__
     </script>
   </head>
   <body>
-  <h1>Fitocracy performance for <%== $username %></h1>
+  <h1>Training log for <em><%== $username %></em></h1>
     <div id="chart_div" style="width: 900px; height: 500px;">Loading...</div>
 	<form>
-	<input type="number" name="minsets" value="<%== $minsets %>"> sets x <input type="number" name="minreps" value="<%== $minreps %>"> reps<br>
+	<input type="number" name="minsets" value="<%== $minsets %>" size="2" max="99"> sets x <input type="number" name="minreps" value="<%== $minreps %>" width="2"> reps<br>
+	Filter to period cycle <%= check_box useperiod => 1 %> of <input type="number" name="period" value="<%== $period %>" width="2"> days<br>
 	<input type="submit">
 	</form>
 	<pre><%== $log %></pre>
