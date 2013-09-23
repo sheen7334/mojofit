@@ -122,7 +122,7 @@ sub movingMax {
 		}
 		#print STDERR "$item->{date} $workouts\n";
 
-		$item->{'consistency'} = sprintf('%d', 100* ($workouts / $perdays) / (3/7));
+		$item->{'consistency'} = $perdays ? sprintf('%d', 10* ($workouts / $perdays) / (3/7)) : 0;
 	}
 }
 
