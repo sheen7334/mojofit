@@ -97,13 +97,13 @@ sub getTargetJson {
 		summariseMax($stream, \@POWERLIFTS);
 	}
 	
-	movingMax($stream, 'Barbell Squat', $period);
+	movingMax($stream, '...', $period);
 	return powerTableMax($stream, $period);
 
 }
 
 sub movingMax {
-	my ($origstream, $exname, $perdays) = @_;
+	my ($origstream, $foo, $perdays) = @_;
 	my $LOOKBACK= $perdays * 24 * 60 *60; # Days to secs
 	
 	my $stream = [sort {$a->{date} <=> $b->{date}} @$origstream];
@@ -146,7 +146,7 @@ sub movingMax {
 			$consistency += 1;# $WEIGHT[$delta];
 			#print STDERR "Hit back $delta\n";
 			my $old = $stream->[$back];
-			if ($old->{'max'}->{$exname}) {
+			if ($old->{'max'}->{'Barbell Squat'} || $old->{'max'}->{'Barbell Deadlift'}) {
 				$workouts ++;
 			}
 			$back--;
