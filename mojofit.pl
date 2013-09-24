@@ -38,10 +38,9 @@ get '/user/:username' => sub {
 	$c->stash('jsperiod', $c->param('useperiod') ? $c->param('period') : 0);
 	#$c->stash('useperiod',$useperiod);
 	my $target = $c->param('username');
-	$target =~ m/^[A-Za-z0-9]+$/ or return $c->render(text => 'Invalid username');
+	$target =~ m/^[A-Za-z0-9\-\.]+$/ or return $c->render(text => 'Invalid username');
 	my $stream = getStream($target);
-	filterPowerlifts($stream);
-	filterMaxWeight($stream);
+
 	
 	$c->stash('log', formatStream($stream));
 };
@@ -49,7 +48,7 @@ get '/user/:username' => sub {
 any '/userjson/:username/:minsets/:minreps/:period' => sub {
 	my $c = shift;
 	my $target = $c->param('username');
-	$target =~ m/^[A-Za-z0-9]+$/ or return $c->render(text => 'Invalid username');
+	$target =~ m/^[A-Za-z0-9\-\.]+$/ or return $c->render(text => 'Invalid username');
 	my $minsets = $c->param('minsets') || 1;
 	my $minreps = $c->param('minreps') || 1;
 	my $period = $c->param('period');
@@ -75,22 +74,31 @@ sub getStream {
 	my ($target) = @_;
 	return '' unless $f->can_read("${target}.json");
 	my $jsonStream=$f->load_file("${target}.json");
-	return decode_json($jsonStream);
+	my $stream = decode_json($jsonStream);
+	if ($target !~ m/^SLIC-/) {
+		# Fito
+		filterPowerlifts($stream);
+		filterMaxWeight($stream);
+	}
+	return $stream;
 }
 
 sub getTargetJson {
 	my ($target, $minsets, $minreps, $period) = @_;
 	return '' unless $f->can_read("${target}.json");
-	
-	my $jsonStream=$f->load_file("${target}.json");
-	my @streamItem = @{decode_json($jsonStream)};
+	my $stream = getStream($target);
 
-	filterPowerlifts(\@streamItem);
-	filterMaxWeight(\@streamItem);
-	filterSetReps(\@streamItem, $minsets, $minreps);
-	summariseMax(\@streamItem, \@POWERLIFTS);
-	movingMax(\@streamItem, 'Barbell Squat', $period);
-	return powerTableMax(\@streamItem, $period);
+	if ($target =~ m/^SLIC-/) {
+		# SLIC JSON
+	}
+	else {
+		# Fitocracy JSON
+		filterSetReps($stream, $minsets, $minreps);
+		summariseMax($stream, \@POWERLIFTS);
+	}
+	
+	movingMax($stream, 'Barbell Squat', $period);
+	return powerTableMax($stream, $period);
 
 }
 
@@ -122,7 +130,7 @@ sub movingMax {
 		}
 		#print STDERR "$item->{date} $workouts\n";
 
-		$item->{'consistency'} = $perdays ? sprintf('%d', 10* ($workouts / $perdays) / (3/7)) : 0;
+		$item->{'consistency'} = $perdays>0 ? sprintf('%d', 10* ($workouts / $perdays) / (3/7)) : 0;
 	}
 }
 
