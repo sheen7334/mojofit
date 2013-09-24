@@ -111,13 +111,11 @@ sub movingMax {
 	for my $i (0..scalar(@$stream)-1) {
 		my $item = $stream->[$i];
 		my $back = $i-1;
-		my $workouts = 0; # Workouts in period
 		#print STDERR "Looking back from $item->{'date'} to $stream->[$back]->{'date'}\n";
 		if ($perdays) {
 			my %permax = map { $_ => $item->{'max'}->{$_} } (@POWERLIFTS);
 			while ($back>=0 && $stream->[$back] && ($stream->[$back]->{'date'}+$LOOKBACK > $item->{'date'})) {
 				my $old = $stream->[$back];
-				$workouts ++ if $old->{'max'}->{$exname};
 				foreach (@POWERLIFTS) {
 					my $oldmax = $old->{'max'}->{$_};
 					if ($permax{$_} && $oldmax) {
@@ -130,7 +128,40 @@ sub movingMax {
 		}
 		#print STDERR "$item->{date} $workouts\n";
 
-		$item->{'consistency'} = $perdays>0 ? sprintf('%d', 10* ($workouts / $perdays) / (3/7)) : 0;
+
+	}
+	
+	my $CONDAYS = 7;
+	my $CONBACK = $CONDAYS * 24 * 60 * 60;
+	for my $i (0..scalar(@$stream)-1) {
+		my $item = $stream->[$i];
+		my $back = $i-1;
+		my $workouts = 0; # Workouts in period
+		my $to = DateTime->from_epoch(epoch=>$item->{'date'});
+		my $consistency = 1;
+		my @WEIGHT = (0,1,3,3,2,2,2,2,2);
+		while ($back>=0 && $stream->[$back] && ($stream->[$back]->{'date'}+$CONBACK > $item->{'date'})) {
+			my $from = DateTime->from_epoch(epoch=>$stream->[$back]->{'date'});
+			my $delta = $to->delta_days($from)->days;
+			$consistency += 1;# $WEIGHT[$delta];
+			#print STDERR "Hit back $delta\n";
+			my $old = $stream->[$back];
+			if ($old->{'max'}->{$exname}) {
+				$workouts ++;
+			}
+			$back--;
+		}
+		$item->{'workouts'} = $workouts;
+		for (my $b=$i-1; $b>=$i-4; $b--) {
+			
+			if ($b>=0 && $stream->[$b]) {
+				#print STDERR "$stream->[$b]->{date} - $stream->[$i]->{date}\n" unless defined $stream->[$b]->{'workouts'};
+				$workouts += $stream->[$b]->{'workouts'};
+				#print STDERR "Accumulate $stream->[$b]->{'workouts'}\n";
+			}
+		}
+		$item->{'consistency'} = $workouts; #sprintf('%d', 10* ($workouts / 7) );
+		
 	}
 }
 
