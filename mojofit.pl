@@ -2,6 +2,9 @@
 use FindBin;
 use lib "$FindBin::Bin";
 use strict;
+
+package Mojofit;
+
 use File::Util;
 use Data::Dumper;
 use Mojo::DOM;
@@ -39,7 +42,7 @@ get '/user/:username' => sub {
 	#$c->stash('useperiod',$useperiod);
 	my $target = $c->param('username');
 	$target =~ m/^[A-Za-z0-9\-\.]+$/ or return $c->render(text => 'Invalid username');
-	my $stream = getStream($target);
+	my $stream = getMaxStream($target);
 
 	
 	$c->stash('log', formatStream($stream));
@@ -57,6 +60,14 @@ any '/userjson/:username/:minsets/:minreps/:period' => sub {
 	$c->render(text => $json, format => 'json');
 };
 
+any '/uservolume/:username' => sub {
+	my $c = shift;
+	my $target = $c->param('username');
+	$target =~ m/^[A-Za-z0-9\-\.]+$/ or return $c->render(text => 'Invalid username');
+	my $stream = getStream($target);
+	
+};
+
 any '/debug' => sub {
     my $c = shift;
 	my @nms = $c->param;
@@ -68,17 +79,25 @@ any '/debug' => sub {
     $c->render(text => $str);
 };
 
-app->start;
-
 sub getStream {
 	my ($target) = @_;
-	return '' unless $f->can_read("${target}.json");
+	return [] unless $f->can_read("${target}.json");
 	my $jsonStream=$f->load_file("${target}.json");
 	my $stream = decode_json($jsonStream);
 	if ($target !~ m/^SLIC-/) {
 		# Fito
 		filterPowerlifts($stream);
-		filterMaxWeight($stream);
+	}
+	bless $stream, "Mojofit::Stream";
+	return $stream;
+}
+
+sub getMaxStream {
+	my ($target) = @_;
+	my $stream = getStream($target);
+	if ($target !~ m/^SLIC-/) {
+		# Fito
+		$stream->filterMaxWeight;
 	}
 	return $stream;
 }
@@ -86,14 +105,14 @@ sub getStream {
 sub getTargetJson {
 	my ($target, $minsets, $minreps, $period) = @_;
 	return '' unless $f->can_read("${target}.json");
-	my $stream = getStream($target);
+	my $stream = getMaxStream($target);
 
 	if ($target =~ m/^SLIC-/) {
 		# SLIC JSON
 	}
 	else {
 		# Fitocracy JSON
-		filterSetReps($stream, $minsets, $minreps);
+		$stream->filterSetReps($minsets, $minreps);
 		summariseMax($stream, \@POWERLIFTS);
 	}
 	
@@ -213,28 +232,14 @@ sub summariseMax {
 	return $stream;
 }
 
-sub filterSetReps {
-	my ($streamItems, $sets, $reps) = @_;
-	foreach my $item (@$streamItems) {
-		foreach my $action (@{$item->{actions}}) {
-			my @goodsets = grep {$_->{reps} >= $reps} (@{$action->{sets}});
-			my $kg = getMaxFromSets(\@goodsets, $sets);
-			#print "$sets x $reps max of $kg    @goodsets\n";
-			$action->{max} = $kg
+sub summariseVolume {
+	my ($stream, $exnames) = @_;
+ 	foreach my $item (@$stream) {
+		foreach (@$exnames) { 
+			$item->{'volume'}->{$_} = getVolumeFromItem($item, $_);
 		}
-
-	}
-	return $streamItems;
-}
-
-sub getMaxFromSets {
-	my ($sets, $minset) = @_;
-	my %setreps;
-	map { $setreps{$_->{kg}}++} (@$sets);
-	foreach my $kg (sort keys %setreps) {
-		return $kg if $setreps{$kg}>=$minset;
-	}
-	return undef;
+ 	}
+	return $stream;
 }
 
 sub getMaxFromItem {
@@ -248,6 +253,18 @@ sub getMaxFromItem {
 	return undef;
 }
 
+sub calcVolumeFromWorkout {
+	my ($item) = @_;
+	foreach my $action (@{$item->{actions}}) {
+		if ($action->{sets}->[0]->{kg} && $action->{sets}->[0]->{reps} ) {
+			my $volume = sum (map {$_->{kg} * $_->{reps}} (@{$action->{sets}}));
+			$action->{'volume'} = $volume;
+		}
+	}
+	return $item;
+}
+
+
 sub filterPowerlifts {
 	my ($streamItems) = shift;
 	my @ret;
@@ -258,19 +275,6 @@ sub filterPowerlifts {
 		push @ret, $item if scalar(@poweractions);
 	}
 	@$streamItems = @ret;
-	return $streamItems;
-}
-
-sub filterMaxWeight {
-	my ($streamItems) = shift;
-	foreach my $item (@$streamItems) {
-		foreach my $action (@{$item->{actions}}) {
-			my $max = max map {$_->{kg}} (@{$action->{sets}});
-			my @maxsets = grep {$_->{kg} == $max} (@{$action->{sets}});
-			$action->{sets} = \@maxsets;
-		}
-
-	}
 	return $streamItems;
 }
 
@@ -330,6 +334,58 @@ sub formatWeightedSets {
 sub Mojo::Collection::DESTROY {
 	# Nothing doing! Do not autoload call
 }
+
+
+app->start;
+
+package Mojofit::Set;
+
+package Mojofit::Workout;
+
+package Mojofit::Stream;
+use List::Util qw(first max maxstr min minstr reduce shuffle sum);
+use List::MoreUtils qw(all);
+
+sub filterSetReps {
+	my ($streamItems, $sets, $reps) = @_;
+	foreach my $item (@$streamItems) {
+		foreach my $action (@{$item->{actions}}) {
+			my @goodsets = grep {$_->{reps} >= $reps} (@{$action->{sets}});
+			my $kg = getMaxFromSets(\@goodsets, $sets);
+			#print "$sets x $reps max of $kg    @goodsets\n";
+			$action->{max} = $kg
+		}
+
+	}
+	return $streamItems;
+}
+
+
+sub filterMaxWeight {
+	my ($streamItems) = shift;
+	foreach my $item (@$streamItems) {
+		foreach my $action (@{$item->{actions}}) {
+			my $max = max map {$_->{kg}} (@{$action->{sets}});
+			my @maxsets = grep {$_->{kg} == $max} (@{$action->{sets}});
+			$action->{sets} = \@maxsets;
+		}
+
+	}
+	return $streamItems;
+}
+
+
+sub getMaxFromSets {
+	my ($sets, $minset) = @_;
+	my %setreps;
+	map { $setreps{$_->{kg}}++} (@$sets);
+	foreach my $kg (sort keys %setreps) {
+		return $kg if $setreps{$kg}>=$minset;
+	}
+	return undef;
+}
+
+package Mojofit;
 
 __DATA__
 @@ userusername.html.ep
