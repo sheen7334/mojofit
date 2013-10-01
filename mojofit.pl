@@ -64,7 +64,15 @@ any '/uservolume/:username' => sub {
 	my $c = shift;
 	my $target = $c->param('username');
 	$target =~ m/^[A-Za-z0-9\-\.]+$/ or return $c->render(text => 'Invalid username');
-	my $stream = getStream($target);
+	my $stream = Mojofit::Stream::getStream($target);
+	
+	my $ret = '';
+	foreach my $item (@$stream) {
+		if ($item->maxFor('Barbell Squat')) {
+			$ret .= $item->{date} . ' ' . $item->maxFor('Barbell Squat') . ' '. $item->volumeFor('Barbell Squat')."\n";
+		}
+	}
+	$c->render(text => $ret);
 	
 };
 
@@ -101,7 +109,6 @@ sub getTargetJson {
 	else {
 		# Fitocracy JSON
 		$stream->filterSetReps($minsets, $minreps);
-		summariseMax($stream, \@POWERLIFTS);
 	}
 	
 	movingMax($stream, '...', $period);
@@ -120,11 +127,11 @@ sub movingMax {
 		my $back = $i-1;
 		#print STDERR "Looking back from $item->{'date'} to $stream->[$back]->{'date'}\n";
 		if ($perdays) {
-			my %permax = map { $_ => $item->{'max'}->{$_} } (@POWERLIFTS);
+			my %permax = map { $_ => $item->maxFor($_) } (@POWERLIFTS);
 			while ($back>=0 && $stream->[$back] && ($stream->[$back]->{'date'}+$LOOKBACK > $item->{'date'})) {
 				my $old = $stream->[$back];
 				foreach (@POWERLIFTS) {
-					my $oldmax = $old->{'max'}->{$_};
+					my $oldmax = $old->maxFor($_);
 					if ($permax{$_} && $oldmax) {
 						$permax{$_} = $permax{$_}< $oldmax ? $oldmax : $permax{$_}
 					}
@@ -134,26 +141,31 @@ sub movingMax {
 			$item->{'permax'} = \%permax;
 		}
 		#print STDERR "$item->{date} $workouts\n";
-
-
 	}
+	consistency($origstream);
+}
+
+sub consistency {
+	my ($origstream, $condays) = @_;
+	$condays ||= 7;	
+	my @WEIGHT = (0,1,3,3,2,2,2,2,2);
 	
-	my $CONDAYS = 7;
-	my $CONBACK = $CONDAYS * 24 * 60 * 60;
+	my $stream = [sort {$a->{date} <=> $b->{date}} @$origstream];
+	
+	my $CONBACK = $condays * 24 * 60 * 60;
 	for my $i (0..scalar(@$stream)-1) {
 		my $item = $stream->[$i];
 		my $back = $i-1;
 		my $workouts = 0; # Workouts in period
 		my $to = DateTime->from_epoch(epoch=>$item->{'date'});
 		my $consistency = 1;
-		my @WEIGHT = (0,1,3,3,2,2,2,2,2);
 		while ($back>=0 && $stream->[$back] && ($stream->[$back]->{'date'}+$CONBACK > $item->{'date'})) {
 			my $from = DateTime->from_epoch(epoch=>$stream->[$back]->{'date'});
 			my $delta = $to->delta_days($from)->days;
 			$consistency += 1;# $WEIGHT[$delta];
 			#print STDERR "Hit back $delta\n";
 			my $old = $stream->[$back];
-			if ($old->{'max'}->{'Barbell Squat'} || $old->{'max'}->{'Barbell Deadlift'}) {
+			if ($old->validPowerLift) {
 				$workouts ++;
 			}
 			$back--;
@@ -208,26 +220,6 @@ sub powerTableMax {
 	 }
 	 my $output = $datatable->output_javascript();
 	 return $output;
-}
-
-sub summariseMax {
-	my ($stream, $exnames) = @_;
- 	foreach my $item (@$stream) {
-		foreach (@$exnames) { 
-			$item->{'max'}->{$_} = $item->getMaxFromItem($_);
-		}
- 	}
-	return $stream;
-}
-
-sub summariseVolume {
-	my ($stream, $exnames) = @_;
- 	foreach my $item (@$stream) {
-		foreach (@$exnames) { 
-			$item->{'volume'}->{$_} = getVolumeFromItem($item, $_);
-		}
- 	}
-	return $stream;
 }
 
 sub calcVolumeFromWorkout {
@@ -340,13 +332,32 @@ sub getMaxFromSets {
 
 
 package Mojofit::StreamItem;
+use List::Util qw(first max maxstr min minstr reduce shuffle sum);
 
-sub maxFromItem {
+sub maxFor {
 	my ($item, $name) = @_;
 	return $item->{max}->{$name} if exists($item->{max}->{$name});
 	my $max = $item->getMaxFromItem($name);
 	$item->{max}->{$name} = $max;
 	return $max;
+}
+
+sub volumeFor {
+	my ($item, $name) = @_;
+	$item->calcVolumeFromItem unless exists $item->{volume};
+	return $item->{volume}->{$name};
+}
+
+sub calcVolumeFromItem {
+	my ($item) = @_;
+	my %volmap;
+	foreach my $action (@{$item->{actions}}) {
+		if ($action->{sets}->[0]->{kg} && $action->{sets}->[0]->{reps} ) {
+			my $volume = sum (map {$_->{kg} * $_->{reps}} (@{$action->{sets}}));
+			$volmap{$action->{name}} = $volume;
+		}
+	}
+	$item->{volume} =  \%volmap;
 }
 
 sub getMaxFromItem {
@@ -359,6 +370,11 @@ sub getMaxFromItem {
 		}
 	}
 	return undef;
+}
+
+sub validPowerLift {
+	my ($item) = @_;
+	return $item->maxFor('Barbell Squat') || $item->maxFor('Barbell Deadlift');
 }
 
 sub filterPowerLifts {
@@ -405,42 +421,60 @@ sub getStream {
 }
 
 # Methods
+sub items {
+	my ($stream) = @_;
+	return @$stream; 
+}
+
 
 sub filterPowerlifts {
-	my ($streamItems) = shift;
+	my ($stream) = shift;
 	my @ret;
-	foreach my $item (@$streamItems) {
+	foreach my $item ($stream->items) {
 		#my @poweractions = grep {$Mojofit::POWERSET{$_->{name}}} (@{$item->{actions}});
 		#$item->{actions} = \@poweractions;
 		$item->filterPowerLifts;
 		#push @ret, $item if scalar(@poweractions);
 		push @ret, $item if $item->actionCount;
 	}
-	@$streamItems = @ret;
-	return $streamItems;
+	# Updating self!!! FIXME
+	@$stream = @ret;
+	return $stream->items;
 }
 
 
 sub filterSetReps {
-	my ($streamItems, $sets, $reps) = @_;
-	foreach my $item (@$streamItems) {
+	my ($stream, $sets, $reps) = @_;
+	foreach my $item ($stream->items) {
 		foreach my $action (@{$item->{actions}}) {
 			$action->filterSetReps($sets, $reps);
 		}
 
 	}
-	return $streamItems;
+	return $stream;
 }
 
 
 sub filterMaxWeight {
-	my ($streamItems) = shift;
-	foreach my $item (@$streamItems) {
+	my ($stream) = shift;
+	foreach my $item ($stream->items) {
 		foreach my $action (@{$item->{actions}}) {
 			$action->filterMaxWeight();
 		}
 	}
-	return $streamItems;
+	return $stream;
+}
+
+sub toListByDate {
+	my ($origstream, $condays) = @_;	
+	my $stream = [sort {$a->{date} <=> $b->{date}} $origstream->items];
+	my $basedate = DateTime->from_epoch(epoch=>$stream->[0]->{'date'})->to_julian;
+	my @byDate;
+	foreach my $item (@$stream) {
+		my $to = DateTime->from_epoch(epoch=>$item->{'date'});
+		$byDate[$to->to_julian - $basedate] = $item;
+	}
+	return \@byDate;
 }
 
 
