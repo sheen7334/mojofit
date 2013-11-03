@@ -13,8 +13,8 @@ use DateTime;
 use DateTime::Format::DateParse;
 
 
-my $m = WWW::Mechanize->new(autocheck=>0);
-my($f) = File::Util->new();
+our $m = WWW::Mechanize->new(autocheck=>0);
+our($f) = File::Util->new();
 
 my $LOGIN_URL = 'https://www.fitocracy.com/accounts/login/';
 
@@ -32,57 +32,92 @@ our $ACTIVITY_TYPES = [
 our $username = 'thumbdog';
 our $password = 'password';
 our $targetuser = 'glorat';
+our $stream_increment = 15; # How much does fito show in one hit
+our $STREAM_LIMIT = 900;
+
 $m->agent_alias('Windows Mozilla');
 
-$m->get($LOGIN_URL);
-$m->form_id('username-login-form');
-my $token  = $m->field('csrfmiddlewaretoken');
-print "Logging in with token $token\n";
-$m->post($LOGIN_URL, {
-	"csrfmiddlewaretoken" => $token,
-	"is_username" => "1",
-	"json" => "1",
-	"next" => "/home/",
-	"username" => $username,
-	"password" => $password,
-});
+#getFromFito();
+getFromStash();
 
-$m->get("https://www.fitocracy.com/profile/$targetuser/?feed");
-my $content = $m->content;
-$content =~ m/var profile_user_id = (\d+)/ or die ("Couldn't find profile_user_id for $targetuser");
-my $targetuserid = $1;
-print STDERR "User $targetuser has id $targetuserid\n";
-my $stream_increment = 15;
-our $STREAM_LIMIT = 900;
-# It is main parsing time
-
-# The root of our data structure
-my $stream_offset = 0;
-my @streamItem;
-while ($stream_offset < $STREAM_LIMIT) {
-	print STDERR "Processing from $stream_offset\n";
-	$m->get("https://www.fitocracy.com/activity_stream/$stream_offset/?user_id=$targetuserid");
-	my $dom = Mojo::DOM->new($m->content);
-	if ($dom->at("div.stream-inner-empty")) {
-		print STDERR "No more items!";
-		last;
+sub getFromStash {
+	my $stream_offset=0;
+	my @streamItem;
+	while ($stream_offset < $STREAM_LIMIT) {
+		my $file = "$targetuser-$stream_offset.html";
+	
+		if ($f->can_read($file)) {
+			print STDERR "Processing from stashed $stream_offset\n";
+			my $html = $f->load_file($file);
+			my $dom = Mojo::DOM->new($html);
+			processStream(\@streamItem, $dom);
+		}
+		else {
+			last;
+		}
+		$stream_offset += $stream_increment;
 	}
-	else {
-		processStream(\@streamItem, $dom)
-	}
-	$stream_offset += $stream_increment;
+	my $jsonStream = encode_json(\@streamItem);
+	$f->write_file('file'=>"$targetuser.json", 'content'=>$jsonStream);
 }
 
+sub getFromFito {
+
+	$m->get($LOGIN_URL);
+	$m->form_id('username-login-form');
+	my $token  = $m->field('csrfmiddlewaretoken');
+	print "Logging in with token $token\n";
+	$m->post($LOGIN_URL, {
+		"csrfmiddlewaretoken" => $token,
+		"is_username" => "1",
+		"json" => "1",
+		"next" => "/home/",
+		"username" => $username,
+		"password" => $password,
+	});
+
+	$m->get("https://www.fitocracy.com/profile/$targetuser/?feed");
+	my $content = $m->content;
+	$content =~ m/var profile_user_id = (\d+)/ or die ("Couldn't find profile_user_id for $targetuser");
+	my $targetuserid = $1;
+	print STDERR "User $targetuser has id $targetuserid\n";
+	our $STREAM_LIMIT = 900;
+	# It is main parsing time
+
+	# The root of our data structure
+	my $stream_offset = 0;
+	my @streamItem;
+	while ($stream_offset < $STREAM_LIMIT) {
+		print STDERR "Processing from $stream_offset\n";
+		$m->get("https://www.fitocracy.com/activity_stream/$stream_offset/?user_id=$targetuserid");
+		$f->write_file("$targetuser-$stream_offset.html", $m->content);
+		my $dom = Mojo::DOM->new($m->content);
+		if ($dom->at("div.stream-inner-empty")) {
+			print STDERR "No more items!";
+			last;
+		}
+		else {
+			processStream(\@streamItem, $dom)
+		}
+		$stream_offset += $stream_increment;
+	}
 
 
 
 
-my $jsonStream = encode_json(\@streamItem);
-$f->write_file('file'=>"$targetuser.json", 'content'=>$jsonStream);
+
+	my $jsonStream = encode_json(\@streamItem);
+	$f->write_file('file'=>"$targetuser.json", 'content'=>$jsonStream);
+}
 
 
 sub processStream {
 	my ($streamItem, $dom) = @_;
+	if ($dom->at("div.stream-inner-empty")) {
+		print STDERR "No more items!";
+		return;
+	}
+	
 	
 	$dom->find('div.stream_item')->each(sub {
 		my $sitem = shift;
@@ -94,9 +129,18 @@ sub processStream {
 			if ($nameEl) {
 				print $date->ymd . " " . $nameEl->text . "\n";
 				my @sets;
-				foreach my $setEl ($actEl->find('ul li span[class~="set_user_metric"]')->each) {
-					my $setText = $setEl->text;
-					push @sets, parseSetText($setText);
+				foreach my $setEl ($actEl->at('ul')->find('li')->each) {
+					if ($setEl->children('span[class="action_prompt_points"]')->first) {
+						# Only point worthy items are sets
+						my $setText = $setEl->text;
+						print STDERR "  ".$setEl->text."\n";
+						print STDERR "***\n";
+						push @sets, parseSetText($setText);
+					}
+					else {
+						print STDERR "Commentary: ". $setEl->text;
+						print STDERR "\n";
+					}
 				}
 				#print "\n";
 				my $name = $nameEl->text;
@@ -117,6 +161,11 @@ sub parseSetText {
 	if ($setText =~ m/([\d\.]+) kg/) {
 		$setData{kg} = $1;
 	}
+	elsif ($setText =~ m/([\d\.]+) lb/) {
+		$setData{lb} = $1;
+		$setData{kg} = sprintf('%.1f', $1 / 2.20462262185); # Fito rounding...
+	}# else??
+	
 	if ($setText =~ m/([\d\.]+) reps/) {
 		$setData{reps} = $1;
 	}
@@ -125,6 +174,6 @@ sub parseSetText {
 }
 
 
-sub Mojo::Collection::DESTROY {
-	# Nothing doing! Do not autoload call
-}
+#sub Mojo::Collection::DESTROY {
+#	# Nothing doing! Do not autoload call
+#}
