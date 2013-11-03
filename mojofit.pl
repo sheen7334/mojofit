@@ -44,7 +44,7 @@ get '/user/:username' => sub {
 	$target =~ m/^[A-Za-z0-9\-\.]+$/ or return $c->render(text => 'Invalid username');
 	my $stream = getMaxStream($target);
 
-	
+	$c->stash('interpolateNulls', 1);
 	$c->stash('log', formatStream($stream));
 };
 
@@ -111,25 +111,31 @@ sub getTargetJson {
 		$stream->filterSetReps($minsets, $minreps);
 	}
 	
-	movingMax($stream, '...', $period);
+	consistency($stream);
+	movingMax($stream, $period);
 	return powerTableMax($stream, $period);
+	#return powerTableConMax($stream, $period);
 
 }
 
 sub movingMax {
-	my ($origstream, $foo, $perdays) = @_;
+	my ($origstream,  $perdays) = @_;
+	$perdays ||=1;
 	my $LOOKBACK= $perdays * 24 * 60 *60; # Days to secs
 	
 	my $stream = [sort {$a->{date} <=> $b->{date}} @$origstream];
-	
+	my %prev = (); #map {$_ => 0 } (@POWERLIFTS);
 	for my $i (0..scalar(@$stream)-1) {
 		my $item = $stream->[$i];
 		my $back = $i-1;
 		#print STDERR "Looking back from $item->{'date'} to $stream->[$back]->{'date'}\n";
 		if ($perdays) {
-			my %permax = map { $_ => $item->maxFor($_) } (@POWERLIFTS);
+			#my %permax = map { $_ => $item->maxFor($_) } (@POWERLIFTS);
+			# Max will use previous max by induction
+			my %permax = map { $_ => $item->maxFor($_) || $prev{$_} } (@POWERLIFTS);
 			while ($back>=0 && $stream->[$back] && ($stream->[$back]->{'date'}+$LOOKBACK > $item->{'date'})) {
 				my $old = $stream->[$back];
+				
 				foreach (@POWERLIFTS) {
 					my $oldmax = $old->maxFor($_);
 					if ($permax{$_} && $oldmax) {
@@ -139,10 +145,14 @@ sub movingMax {
 				$back--;
 			}
 			$item->{'permax'} = \%permax;
+			%prev = %permax;
+
+			
+		}
+		else {
 		}
 		#print STDERR "$item->{date} $workouts\n";
 	}
-	consistency($origstream);
 }
 
 sub consistency {
@@ -153,12 +163,15 @@ sub consistency {
 	my $stream = [sort {$a->{date} <=> $b->{date}} @$origstream];
 	
 	my $CONBACK = $condays * 24 * 60 * 60;
+	my $sumcon = 0;
+	
 	for my $i (0..scalar(@$stream)-1) {
 		my $item = $stream->[$i];
 		my $back = $i-1;
 		my $workouts = 0; # Workouts in period
 		my $to = DateTime->from_epoch(epoch=>$item->{'date'});
 		my $consistency = 1;
+		$item->{'sincelast'} = 0;
 		while ($back>=0 && $stream->[$back] && ($stream->[$back]->{'date'}+$CONBACK > $item->{'date'})) {
 			my $from = DateTime->from_epoch(epoch=>$stream->[$back]->{'date'});
 			my $delta = $to->delta_days($from)->days;
@@ -166,11 +179,15 @@ sub consistency {
 			#print STDERR "Hit back $delta\n";
 			my $old = $stream->[$back];
 			if ($old->validPowerLift) {
+				$item->{'sincelast'} ||= $delta;
 				$workouts ++;
 			}
 			$back--;
 		}
+		#print STDERR "Since last $item->{'sincelast'}\n";
+		
 		$item->{'workouts'} = $workouts;
+		$sumcon += $item->{'sincelast'} / 3;
 		for (my $b=$i-1; $b>=$i-4; $b--) {
 			
 			if ($b>=0 && $stream->[$b]) {
@@ -180,6 +197,7 @@ sub consistency {
 			}
 		}
 		$item->{'consistency'} = $workouts; #sprintf('%d', 10* ($workouts / 7) );
+		$item->{'sumcon'} = $sumcon;
 		
 	}
 }
@@ -221,6 +239,26 @@ sub powerTableMax {
 	 my $output = $datatable->output_javascript();
 	 return $output;
 }
+
+sub powerTableConMax {
+	my ($streamItems, $period) = @_;
+	my $maxfld = $period ? 'permax' : 'max';
+	my $datatable = Data::Google::Visualization::DataTable->new();
+	my @powercols = map { {id=>'', label=>$_, type=>'number'}} @POWERLIFTS;
+	 $datatable->add_columns(
+			{ id => 'consistency',     label => "Work",        type => 'number', p => {}},
+	        @powercols,
+	 );
+
+	 foreach my $item (@$streamItems) {
+		 my @row = ({v=>$item->{sumcon}, f=>"$item->{sumcon} - ".$item->date->ymd},  );
+		 map { push @row, {v=>$item->{$maxfld}->{$_}} } (@POWERLIFTS);
+		 $datatable->add_rows(\@row);
+	 }
+	 my $output = $datatable->output_javascript();
+	 return $output;
+}
+
 
 sub calcVolumeFromWorkout {
 	my ($item) = @_;
@@ -333,6 +371,11 @@ sub getMaxFromSets {
 
 package Mojofit::StreamItem;
 use List::Util qw(first max maxstr min minstr reduce shuffle sum);
+
+sub date {
+	my ($item) = @_;
+	$item->{dateobj} ||= DateTime->from_epoch( epoch => $item->{date});
+}
 
 sub maxFor {
 	my ($item, $name) = @_;
@@ -505,7 +548,7 @@ __DATA__
 	  
       function drawChart() {
 		  var data = new google.visualization.DataTable(jsonData);
-		  var options = {"hAxis":{"title":""},"vAxis":{"title":"","format":"# kg"},"width":900,"height":500,"interpolateNulls":true,"legend":{"position":"top","maxLines":5}};
+		  var options = {"hAxis":{"title":""},"vAxis":{"title":"","format":"# kg"},"width":900,"height":500,"interpolateNulls":<%== $interpolateNulls ? 'true' : 'false' %>,"legend":{"position":"top","maxLines":5}};
 
         var chart = new google.visualization.LineChart(document.getElementById('chart_div'));
         chart.draw(data, options);
