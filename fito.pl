@@ -11,7 +11,8 @@ use List::Util qw(first max maxstr min minstr reduce shuffle sum);
 use List::MoreUtils qw(all);
 use DateTime;
 use DateTime::Format::DateParse;
-
+use FindBin;
+use lib "$FindBin::Bin/../lib";
 
 our $m = WWW::Mechanize->new(autocheck=>0);
 our($f) = File::Util->new();
@@ -37,14 +38,14 @@ our $STREAM_LIMIT = 900;
 
 $m->agent_alias('Windows Mozilla');
 
-#getFromFito();
-getFromStash();
+getFromFito();
+#getFromStash();
 
 sub getFromStash {
 	my $stream_offset=0;
 	my @streamItem;
 	while ($stream_offset < $STREAM_LIMIT) {
-		my $file = "$targetuser-$stream_offset.html";
+		my $file = "data/$targetuser-$stream_offset.html";
 	
 		if ($f->can_read($file)) {
 			print STDERR "Processing from stashed $stream_offset\n";
@@ -90,7 +91,7 @@ sub getFromFito {
 	while ($stream_offset < $STREAM_LIMIT) {
 		print STDERR "Processing from $stream_offset\n";
 		$m->get("https://www.fitocracy.com/activity_stream/$stream_offset/?user_id=$targetuserid");
-		$f->write_file("$targetuser-$stream_offset.html", $m->content);
+		#$f->write_file("data/$targetuser-$stream_offset.html", $m->content);
 		my $dom = Mojo::DOM->new($m->content);
 		if ($dom->at("div.stream-inner-empty")) {
 			print STDERR "No more items!";
