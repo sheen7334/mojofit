@@ -155,6 +155,54 @@ sub movingMax {
 	}
 }
 
+
+sub adjustedMax {
+	my ($origstream,  $perdays) = @_;
+	$perdays ||=1;
+	my $LOOKBACK= $perdays * 24 * 60 *60; # Days to secs
+	# Need a contiguous stream for this algo!
+	my $stream = $origstream->toListByDate;
+	my %prev = (); #map {$_ => 0 } (@POWERLIFTS);
+	for my $i (0..scalar(@$stream)-1) {
+		my $item = $stream->[$i];
+		my $back = $i - $perdays;
+		$back = 0 if $back < 0;
+		# Go from back to behind current
+		# Baseline the point from which we want to see improvements
+		my %permax = %{$stream->[$back]->{'permax'}};
+		# Inductively adjusted to current
+		$back ++;
+		while ($back < $i) {
+			my $old = $stream->[$back];
+			foreach (@POWERLIFTS) {
+				my $oldmax = $old->{'permax'}->{$_};
+				if ($oldmax > $permax{$_}) {
+					# We are moving on up!
+					$permax->{$_} = $oldmax
+				}
+				else {
+					# We didn't improve but...
+					if ($item->maxFor($_) > $permax{$_}) {
+						# It was just a blip - ignore it
+						$oldmax->{'permax'}->{$_} = undef;
+						
+					}
+					else {
+						# No more improvements count - exit look
+						last;
+					}
+				}
+				# Keep going here!!!
+			}
+			$back++;
+			
+		}
+		
+		#print STDERR "$item->{date} $workouts\n";
+	}
+}
+
+
 sub consistency {
 	my ($origstream, $condays) = @_;
 	$condays ||= 7;	
@@ -325,9 +373,9 @@ sub formatWeightedSets {
 }
 
 
-sub Mojo::Collection::DESTROY {
-	# Nothing doing! Do not autoload call
-}
+#sub Mojo::Collection::DESTROY {
+#	# Nothing doing! Do not autoload call
+#}
 
 
 app->start;
