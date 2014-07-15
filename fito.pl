@@ -34,7 +34,8 @@ our $username = 'thumbdog';
 our $password = 'password';
 our $targetuser = 'glorat';
 our $stream_increment = 15; # How much does fito show in one hit
-our $STREAM_LIMIT = 900;
+#our $STREAM_LIMIT = 900;
+our $STREAM_LIMIT = 30;
 
 $m->agent_alias('Windows Mozilla');
 
@@ -82,7 +83,6 @@ sub getFromFito {
 	$content =~ m/var profile_user_id = (\d+)/ or die ("Couldn't find profile_user_id for $targetuser");
 	my $targetuserid = $1;
 	print STDERR "User $targetuser has id $targetuserid\n";
-	our $STREAM_LIMIT = 900;
 	# It is main parsing time
 
 	# The root of our data structure
@@ -131,17 +131,17 @@ sub processStream {
 				print $date->ymd . " " . $nameEl->text . "\n";
 				my @sets;
 				foreach my $setEl ($actEl->at('ul')->find('li')->each) {
-					if ($setEl->children('span[class="action_prompt_points"]')->first) {
+					#if ($setEl->children('span[class="action_prompt_points"]')->first) {
 						# Only point worthy items are sets
 						my $setText = $setEl->text;
 						print STDERR "  ".$setEl->text."\n";
-						print STDERR "***\n";
+					#	print STDERR "***\n";
 						push @sets, parseSetText($setText);
-					}
-					else {
-						print STDERR "Commentary: ". $setEl->text;
-						print STDERR "\n";
-					}
+					#}
+					#else {
+					#	print STDERR "Commentary: ". $setEl->text;
+					#	print STDERR "\n";
+					#}
 				}
 				#print "\n";
 				my $name = $nameEl->text;
