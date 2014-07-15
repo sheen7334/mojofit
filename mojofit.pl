@@ -178,7 +178,7 @@ sub adjustedMax {
 				my $oldmax = $old->{'permax'}->{$_};
 				if ($oldmax > $permax{$_}) {
 					# We are moving on up!
-					$permax->{$_} = $oldmax
+					$permax{$_} = $oldmax
 				}
 				else {
 					# We didn't improve but...
