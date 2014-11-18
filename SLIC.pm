@@ -72,6 +72,7 @@ sub parse_action {
 	my %SLIC_TO_MOJO = (
 	'Squat'=>'Barbell Squat',
 	'Press'=>'Standing Barbell Shoulder Press (OHP)',
+	'Overhead Press' => 'Standing Barbell Shoulder Press (OHP)',
 	'Bench'=>'Barbell Bench Press',
 	'Deadlift'=>'Barbell Deadlift',);
 	
@@ -92,7 +93,7 @@ sub parse_action {
 		}
 	}
 	
-	parse_warn ("$exname\n");
+	parse_warn ("$exname");
 	foreach (@{$action->{sets}}) {
 	my $unit = 'kg';
 		parse_warn ("$_->{reps} x $_->{$unit}$unit");
