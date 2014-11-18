@@ -15,6 +15,8 @@ use DateTime::Format::DateParse;
 use Data::Google::Visualization::DataTable;
 
 use Mojolicious::Lite;
+use SLIC;
+use JSON; 
 
 #plugin 'TagHelpers';
 
@@ -87,6 +89,26 @@ any '/debug' => sub {
     $c->render(text => $str);
 };
 
+get '/slic' => sub {
+	my $c = shift;
+	$c->render();
+};
+
+post '/slicparse' => sub {
+	my $c = shift;
+	my $text = $c->param('text');
+	my ($name, $items, $warns) = SLIC::parse_text($text);
+	foreach (@$warns) { 
+		$c->app->log->warn($_);
+	}
+	$name =~ s/ //g;
+	open OUT, ">$name.json";
+	print OUT encode_json($items);
+	close OUT; 
+	
+	$c = $c->redirect_to("/user/$name");
+	
+};
 
 sub getMaxStream {
 	my ($target) = @_;
@@ -658,5 +680,17 @@ __DATA__
     </div>
 	<button onclick="toImg(document.getElementById('chart_div'), document.getElementById('img_div'));">Convert to image</button>
 	<pre><%== $log %></pre>
+  </body>
+</html>
+
+@@slic.html.ep
+
+<html>
+  <head><title>SLIC parser</title></head>
+  <body>
+  <p>Go to your workout tab and copy paste all the text on each of your workout tabs into the below. Only the Chrome browser has been tested. It will probably not work with other browsers</p>
+  <form method="POST" action="/slicparse">
+  <textarea name="text" cols="80" rows="25"></textarea>
+  <input type="submit">
   </body>
 </html>
