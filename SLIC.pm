@@ -13,15 +13,16 @@ our @WARNS;
 
 sub parse_text {
 	my ($text) = @_;
-	$text =~ s/\r\n/\n/g;
-	$text =~ s/\r/\n/g;
+	$text =~ s/\r\n/\n/g; # Stupid windows convention
+	$text =~ s/\r/\n/g; # Enforce \n only
+	$text =~ s/\n\ +/\n/g; #Trim leading space
 	
 	open OUT, ">prev.txt";
 	print OUT $text;
 	close OUT;
 	
 	@WARNS = ();
-	$text =~ m/\n(.*?)'s Log -/ or die ("Can't find name");
+	$text =~ m/\n([\S\ ]*?)'s? Log \-/s or die ("Can't find your name inside the text");
 	my $name = $1;
 	$name =~ m/^\w[\w\ \d]+$/ or die ("Invalid name parsed $name"); #Whitelist name for file saving
 	my @posts = split(/Joined: \w+ \d+\s*(?:Follow)?\s*/, $text);
