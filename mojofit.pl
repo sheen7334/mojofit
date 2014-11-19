@@ -15,8 +15,10 @@ use DateTime::Format::DateParse;
 use Data::Google::Visualization::DataTable;
 
 use Mojolicious::Lite;
-use SLIC;
 use JSON; 
+
+use SLIC;
+use Fitstore;
 
 #plugin 'TagHelpers';
 
@@ -101,10 +103,15 @@ post '/slicparse' => sub {
 	foreach (@$warns) { 
 		$c->app->log->warn($_);
 	}
-	$name =~ s/ //g;
-	open OUT, ">$name.json";
-	print OUT encode_json($items);
-	close OUT; 
+	#$name =~ s/ //g;
+	$name =~ s/\W//g; # Kill non-word chars for now. Be safe
+	
+	# Put in event store
+	my $store = Fitstore->new($name);
+	$store->submit_workouts($items);
+	
+	my $view = Fitstore::MainView->new($name);
+	$view->write_by_date();
 	
 	$c = $c->redirect_to("/user/$name");
 	
