@@ -105,12 +105,13 @@ sub parse_action {
 # returns sets
 sub parse_reps {
 	my ($str, $weight, $unit) = @_;
-	if ($str =~ m/(\d+)x/) { #5x100kg
-		return [{reps=>1, $unit=>$weight}];
-	}
-	elsif ($str =~ m/(\d+)x(\d+)/) { # 5x5 100kg
+
+	if ($str =~ m/(\d+)x(\d+)/) { # 5x5 100kg
 		my ($sets, $reps) = ($1,$2);
 		return [map { {reps=>$reps, $unit=>$weight} } (1..$sets)];
+	}
+	elsif ($str =~ m/(\d+)x/) { #5x100kg
+		return [{reps=>$1, $unit=>$weight}];
 	}
 	elsif ($str =~ m|\d+(/\d+)+|) { # 1/0/0 100kg
 		my @reps = split(m|/|, $str);

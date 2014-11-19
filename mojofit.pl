@@ -20,6 +20,9 @@ use JSON;
 use SLIC;
 use Fitstore;
 
+our $DATA_DIR = "$FindBin::Bin/data";
+$Fitstore::DATA_DIR = $DATA_DIR;
+
 #plugin 'TagHelpers';
 
 # Config
@@ -517,8 +520,8 @@ use Data::Dumper;
 
 sub getStream {
 	my ($target) = @_;
-	return [] unless $f->can_read("${target}.json");
-	my $jsonStream=$f->load_file("${target}.json");
+	return [] unless $f->can_read("$DATA_DIR/${target}.json");
+	my $jsonStream=$f->load_file("$DATA_DIR/${target}.json");
 	my $stream = decode_json($jsonStream);
 
 	bless $stream, "Mojofit::Stream";

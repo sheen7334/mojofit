@@ -110,7 +110,7 @@ sub write_by_date {
 	my ($self) = @_;
 	my @keys = sort keys %{$self->{bydate}};
 	my @items = map {$self->{bydate}->{$_}} (@keys);
-	open OUT, ">$self->{id}.json";
+	open OUT, ">$Fitstore::DATA_DIR/$self->{id}.json";
 	print OUT encode_json(\@items);
 	close OUT; 
 }
